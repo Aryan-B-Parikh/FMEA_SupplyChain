@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from pathlib import Path
 import yaml
 import sys
+import os
 from datetime import datetime
 import logging
 from PIL import Image
@@ -26,6 +27,32 @@ from risk_scoring import RiskScoringEngine
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Currency conversion rate (USD to INR)
+USD_TO_INR_RATE = 83.50
+
+def format_currency(amount, currency='USD'):
+    """
+    Format currency based on type (USD or INR).
+    
+    Args:
+        amount: Numeric amount to format
+        currency: 'USD' or 'INR'
+    
+    Returns:
+        Formatted string like "$10,000.00" or "₹8,35,000.00"
+    """
+    if amount is None:
+        return "N/A"
+    
+    if currency == 'INR':
+        return f"₹{amount:,.2f}"
+    else:
+        return f"${amount:,.2f}"
+
+def get_currency_symbol(currency='USD'):
+    """Get currency symbol."""
+    return "₹" if currency == 'INR' else "$"
 
 # Page configuration
 st.set_page_config(
@@ -307,7 +334,13 @@ def main():
         """)
     
     # Main content area
-    tab1, tab2, tab3, tab4 = st.tabs(["📝 Generate FMEA", "🎯 PFMEA Generator", "📊 Analytics", "ℹ️ Help"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📝 Generate FMEA", 
+        "🎯 PFMEA Generator", 
+        "🚚 Supply Chain Risk",
+        "📊 Analytics", 
+        "ℹ️ Help"
+    ])
     
     with tab1:
         st.markdown('<div class="sub-header">Generate FMEA</div>', unsafe_allow_html=True)
@@ -664,6 +697,529 @@ def main():
                 st.markdown("*Fill the form and click Generate to see results*")
     
     with tab3:
+        st.markdown('<div class="sub-header">🚚 Supply Chain Risk Mitigation</div>', unsafe_allow_html=True)
+        st.markdown("### Real-Time Transport Optimization with Disruption Analysis")
+        
+        # Import mitigation module
+        try:
+            sys.path.append(str(Path(__file__).parent))
+            from mitigation_module import (
+                format_for_streamlit,
+                get_route_change_summary
+            )
+            from mitigation_module.mitigation_solver import solve_guardian_plan, generate_impact_report
+            from mitigation_module.network_config import validate_network, ROUTE_MAP
+            
+            # Network validation
+            network_info = validate_network()
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col2:
+                st.markdown("#### 🌐 Dynamic Network Status")
+                st.caption("🚀 NO HARDCODING - ALL ROUTES AUTO-GENERATED")
+                
+                # Key metrics
+                st.metric("Warehouses", network_info['num_warehouses'], help="Multiple origin points")
+                st.metric("Distribution Hubs", network_info['num_hubs'], help="For multi-hop routing")
+                st.metric("Total Route Options", network_info['num_total_routes'], help="Direct + Multi-hop routes")
+                
+                # Route breakdown
+                with st.expander("📊 Route Breakdown"):
+                    st.metric("Direct Routes", network_info['num_direct_routes'], help="Warehouse → City")
+                    st.metric("Multi-Hop Routes", network_info['num_multihop_routes'], help="Warehouse → Hub → City")
+                    st.metric("Legacy Routes (CSV)", network_info['num_routes'], help="Hardcoded for data compatibility")
+                
+                st.metric("Target Cities", network_info['num_clients'])
+                st.metric("Supply Surplus", f"{network_info['surplus']} units")
+                
+                if network_info.get('dynamic_routing'):
+                    st.success("✓ Dynamic Routing ENABLED")
+            
+            with col1:
+                st.markdown("#### 🛡️ Guardian Mode - Shipment Plan")
+                st.info("📦 **Intelligent Input Parsing**: System extracts quantities, budgets, dates, and priorities from your natural language input, then scans news for risks and optimizes routes.")
+                
+                shipment_plan = st.text_area(
+                    "Enter your shipment plan:",
+                    height=120,
+                    placeholder="Examples:\n• I need to ship 500 units to Boston on Feb 10th\n• URGENT: Send 1000 units to Chicago with budget $20,000\n• Deliver 750 units to Seattle by 2/15\n• Ship to Miami (uses default quantity)"
+                )
+                
+                if shipment_plan and st.button("🛡️ Activate Guardian Analysis", type="primary", use_container_width=True):
+                    with st.spinner("🔍 Scanning news for risks and optimizing routes..."):
+                        from mitigation_module import solve_guardian_plan
+                        from mitigation_module.mitigation_solver import select_routes_with_llm
+                        
+                        initial_plan, mitigation_plan, risk_info, destination, requirements = solve_guardian_plan(shipment_plan)
+                        
+                        if initial_plan and mitigation_plan:
+                            # Run LLM route analysis
+                            qty = requirements.get('quantity', 1000)
+                            budget = requirements.get('budget')
+                            
+                            llm_analysis = select_routes_with_llm(
+                                destination=destination,
+                                quantity=qty,
+                                budget=budget,
+                                risk_factor=20.0 if "ALERT" in risk_info else 1.0
+                            )
+                            
+                            # Store results with destination filter
+                            st.session_state['optimization_result'] = {
+                                'initial_plan': initial_plan,
+                                'mitigation_plan': mitigation_plan,
+                                'impact_table': generate_impact_report(initial_plan, mitigation_plan, destination),
+                                'risk_info': risk_info,
+                                'destination': destination,
+                                'requirements': requirements,
+                                'llm_analysis': llm_analysis
+                            }
+                            st.success("✅ Guardian Analysis Complete!")
+                            
+                            # Show risk alert if found
+                            if "ALERT" in risk_info:
+                                st.error(f"⚠️ {risk_info}")
+                            else:
+                                st.success(f"✅ {risk_info}")
+                        else:
+                            st.error(f"❌ Analysis failed: {risk_info}")
+            
+            # Display optimization results
+            if 'optimization_result' in st.session_state:
+                result = st.session_state['optimization_result']
+                initial_plan = result['initial_plan']
+                mitigation_plan = result['mitigation_plan']
+                destination = result.get('destination', 'Unknown')
+                requirements = result.get('requirements', {})
+                
+                st.markdown("---")
+                
+                # Display Parsed Requirements
+                st.markdown("### 📋 Parsed Shipment Requirements")
+                req_cols = st.columns([1, 1, 1, 1])
+                
+                with req_cols[0]:
+                    st.metric(
+                        "🎯 Destination", 
+                        destination if destination else "Not specified"
+                    )
+                
+                with req_cols[1]:
+                    qty = requirements.get('quantity')
+                    if qty:
+                        st.metric("📦 Quantity", f"{qty:,} units", help="From your input")
+                    else:
+                        from mitigation_module.dynamic_network import get_city_demand
+                        default_qty = get_city_demand(destination)
+                        st.metric("📦 Quantity", f"{default_qty:,} units", help="Default value (not specified in input)")
+                
+                with req_cols[2]:
+                    budget = requirements.get('budget')
+                    currency = requirements.get('currency', 'USD')
+                    if budget:
+                        st.metric("💵 Budget", format_currency(budget, currency), help="From your input")
+                    else:
+                        st.metric("💵 Budget", "Not specified", help="No budget constraint")
+                
+                with req_cols[3]:
+                    date = requirements.get('date')
+                    if date:
+                        st.metric("📅 Delivery", date, help="From your input")
+                    else:
+                        st.metric("📅 Delivery", "Not specified", help="No delivery date specified")
+                
+                # Show priority if specified
+                priority = requirements.get('priority')
+                if priority:
+                    st.info(f"⚡ **Priority Level:** {priority}")
+                
+                st.markdown("---")
+                
+                # Show all available routes for this destination
+                st.markdown(f"### 🛣️ Available Routes for {destination}")
+                
+                from mitigation_module.dynamic_network import get_full_route_map
+                full_route_map = get_full_route_map()
+                
+                # Filter routes for this destination
+                available_routes = {}
+                for route_id, route_tuple in full_route_map.items():
+                    dest = route_tuple[-1]  # Last element is destination
+                    if dest == destination:
+                        available_routes[route_id] = route_tuple
+                
+                if available_routes:
+                    # Categorize routes
+                    direct_routes = {rid: r for rid, r in available_routes.items() if len(r) == 2}
+                    multihop_routes = {rid: r for rid, r in available_routes.items() if len(r) == 3}
+                    
+                    col_route1, col_route2, col_route3 = st.columns(3)
+                    
+                    with col_route1:
+                        st.metric(
+                            "Total Route Options",
+                            len(available_routes),
+                            help=f"All available routes to {destination}"
+                        )
+                    
+                    with col_route2:
+                        st.metric(
+                            "Direct Routes",
+                            len(direct_routes),
+                            help="Warehouse → City (1 hop)"
+                        )
+                    
+                    with col_route3:
+                        st.metric(
+                            "Multi-Hop Routes",
+                            len(multihop_routes),
+                            help="Warehouse → Hub → City (2 hops)"
+                        )
+                    
+                    # Show route details
+                    with st.expander(f"📋 View All {len(available_routes)} Available Routes"):
+                        st.markdown("**Direct Routes:**")
+                        for rid, route in sorted(direct_routes.items()):
+                            src, dst = route
+                            st.text(f"  Route {rid}: {src} → {dst}")
+                        
+                        if multihop_routes:
+                            st.markdown("\n**Multi-Hop Routes (via Hubs):**")
+                            for rid, route in sorted(multihop_routes.items()):
+                                src, hub, dst = route
+                                st.text(f"  Route {rid}: {src} → {hub} → {dst}")
+                else:
+                    st.warning(f"No routes found for {destination}")
+                
+                st.markdown("---")
+                st.markdown(f"### 📊 Route Impact Analysis - {destination}")
+                st.caption("🤖 Showing ALL available routes with AI-powered selection analysis")
+                
+                # Display impact table using NEW format
+                impact_table = result['impact_table']
+                
+                if not impact_table.empty:
+                    # Add LLM route selection analysis
+                    st.info("🧠 **AI Route Analysis**: System analyzed all available routes considering cost, reliability, and risk factors to recommend optimal routing strategy.")
+                    
+                    st.dataframe(
+                        impact_table,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Route ID": st.column_config.TextColumn("Route ID", width="small"),
+                            "Type": st.column_config.TextColumn("Type", width="small"),
+                            "Route Path": st.column_config.TextColumn("Route Path", width="large"),
+                            "Cost/Unit": st.column_config.TextColumn("Cost/Unit", width="small"),
+                            "Availability": st.column_config.TextColumn("Availability", width="small"),
+                            "Initial Qty": st.column_config.NumberColumn("Initial Qty", width="small"),
+                            "Final Qty": st.column_config.NumberColumn("Final Qty", width="small"),
+                            "Status": st.column_config.TextColumn("Status", width="small")
+                        }
+                    )
+                    
+                    # Display LLM Route Selection Analysis
+                    if 'llm_analysis' in result:
+                        llm_data = result['llm_analysis']
+                        st.markdown("---")
+                        st.markdown("### 🤖 AI Route Selection Reasoning")
+                        
+                        # Display overall analysis
+                        st.success(f"**Strategy**: {llm_data['analysis']}")
+                        
+                        # Display selected routes with reasoning
+                        col_llm1, col_llm2 = st.columns(2)
+                        
+                        with col_llm1:
+                            st.markdown("#### 🎯 Selected Routes")
+                            for route_info in llm_data['selected_routes']:
+                                role_emoji = "🥇" if route_info['role'] == 'primary' else "🥈"
+                                st.info(f"{role_emoji} **Route {route_info['route_id']}** ({route_info['role'].title()})\n\n{route_info['reason']}\n\n Quantity: {route_info['quantity']:,} units")
+                        
+                        with col_llm2:
+                            st.markdown("#### 💵 Cost Analysis")
+                            currency = requirements.get('currency', 'USD')
+                            st.metric("Total Estimated Cost", format_currency(llm_data['total_cost'], currency))
+                            st.metric("Selected Routes", len(llm_data['selected_routes']))
+                            
+                            # Budget compliance
+                            if requirements.get('budget'):
+                                budget = requirements['budget']
+                                remaining = budget - llm_data['total_cost']
+                                if remaining >= 0:
+                                    st.success(f"✅ Within Budget: {format_currency(remaining, currency)} remaining")
+                                else:
+                                    st.error(f"⚠️ Over Budget: {format_currency(abs(remaining), currency)} excess")
+                    
+                    st.markdown("---")
+                    st.markdown("### 💰 Cost Effective Analysis & Replanned Routes")
+                    
+                    # Calculate detailed costs
+                    from mitigation_module.dynamic_network import get_route_cost, get_full_route_map
+                    import pandas as pd
+                    
+                    # Load CSV for accurate costs
+                    csv_path = 'Dataset_AI_Supply_Optimization.csv'
+                    df_costs = None
+                    if os.path.exists(csv_path):
+                        df_costs = pd.read_csv(csv_path, encoding='latin1')
+                        df_costs.columns = [c.strip() for c in df_costs.columns]
+                    
+                    full_route_map = get_full_route_map()
+                    
+                    # Get requested quantity (from user input or default)
+                    requested_qty = requirements.get('quantity')
+                    is_user_specified = requested_qty is not None
+                    if not requested_qty:
+                        from mitigation_module.dynamic_network import get_city_demand
+                        requested_qty = get_city_demand(destination)
+                    
+                    # Calculate total quantities in plans
+                    total_initial_qty = sum(qty for qty in initial_plan.values() if qty > 0)
+                    total_mitigation_qty = sum(qty for qty in mitigation_plan.values() if qty > 0)
+                    
+                    # Calculate total costs
+                    total_initial_cost = 0
+                    total_mitigation_cost = 0
+                    
+                    for route_id, quantity in initial_plan.items():
+                        if quantity > 0:
+                            cost_per_unit = get_route_cost(route_id, df_costs)
+                            total_initial_cost += cost_per_unit * quantity
+                    
+                    for route_id, quantity in mitigation_plan.items():
+                        if quantity > 0:
+                            cost_per_unit = get_route_cost(route_id, df_costs)
+                            total_mitigation_cost += cost_per_unit * quantity
+                    
+                    # Display quantity validation
+                    st.markdown("#### 📦 Shipment Volume Summary")
+                    qty_col1, qty_col2, qty_col3, qty_col4 = st.columns(4)
+                    
+                    with qty_col1:
+                        label = "Requested Quantity" if is_user_specified else "Default Quantity"
+                        st.metric(
+                            label,
+                            f"{requested_qty:,} units",
+                            help="From your input" if is_user_specified else "System default"
+                        )
+                    
+                    with qty_col2:
+                        qty_match = (total_initial_qty == requested_qty)
+                        st.metric(
+                            "Initial Plan Total",
+                            f"{total_initial_qty:,} units",
+                            delta="✓ Match" if qty_match else f"⚠ {total_initial_qty - requested_qty:+,}",
+                            delta_color="normal" if qty_match else "off"
+                        )
+                    
+                    with qty_col3:
+                        qty_match_mit = (total_mitigation_qty == requested_qty)
+                        st.metric(
+                            "Mitigation Plan Total",
+                            f"{total_mitigation_qty:,} units",
+                            delta="✓ Match" if qty_match_mit else f"⚠ {total_mitigation_qty - requested_qty:+,}",
+                            delta_color="normal" if qty_match_mit else "off"
+                        )
+                    
+                    with qty_col4:
+                        qty_unchanged = (total_initial_qty == total_mitigation_qty)
+                        st.metric(
+                            "Volume Change",
+                            "None" if qty_unchanged else f"{total_mitigation_qty - total_initial_qty:+,}",
+                            help="Difference in total units shipped"
+                        )
+                    
+                    # Warning if quantities don't match
+                    if not qty_match or not qty_match_mit:
+                        st.warning("⚠️ Note: Plan quantities differ from requested quantity. This may indicate routing constraints or optimization adjustments.")
+                    
+                    st.markdown("#### 💵 Cost Comparison")
+                    
+                    # Get currency for display
+                    currency = requirements.get('currency', 'USD')
+                    
+                    cost_col1, cost_col2, cost_col3, cost_col4 = st.columns(4)
+                    
+                    with cost_col1:
+                        st.metric(
+                            "Original Plan Cost",
+                            format_currency(total_initial_cost, currency),
+                            help=f"Total cost for {total_initial_qty:,} units using initial routes"
+                        )
+                    
+                    with cost_col2:
+                        st.metric(
+                            "Mitigation Plan Cost",
+                            format_currency(total_mitigation_cost, currency),
+                            delta=format_currency(total_mitigation_cost - total_initial_cost, currency),
+                            delta_color="inverse",
+                            help=f"Total cost for {total_mitigation_qty:,} units after rerouting"
+                        )
+                    
+                    with cost_col3:
+                        cost_change_pct = ((total_mitigation_cost - total_initial_cost) / total_initial_cost * 100) if total_initial_cost > 0 else 0
+                        st.metric(
+                            "Cost Change %",
+                            f"{cost_change_pct:+.1f}%",
+                            help="Percentage change in total cost"
+                        )
+                    
+                    with cost_col4:
+                        cost_per_unit_initial = total_initial_cost / total_initial_qty if total_initial_qty > 0 else 0
+                        cost_per_unit_mit = total_mitigation_cost / total_mitigation_qty if total_mitigation_qty > 0 else 0
+                        st.metric(
+                            "Cost per Unit",
+                            format_currency(cost_per_unit_mit, currency),
+                            delta=format_currency(cost_per_unit_mit - cost_per_unit_initial, currency),
+                            delta_color="inverse",
+                            help="Average cost per unit shipped"
+                        )
+                    
+                    # Budget check if specified
+                    if requirements.get('budget'):
+                        budget = requirements['budget']
+                        budget_status = "✅ Within Budget" if total_mitigation_cost <= budget else "⚠️ Over Budget"
+                        budget_diff = budget - total_mitigation_cost
+                        if budget_diff >= 0:
+                            st.success(f"{budget_status} - {format_currency(budget_diff, currency)} remaining from {format_currency(budget, currency)} budget")
+                        else:
+                            st.error(f"{budget_status} - {format_currency(abs(budget_diff), currency)} over {format_currency(budget, currency)} budget")
+                    
+                    # Detailed Route Plan
+                    st.markdown("#### 📊 Detailed Replanned Route Information")
+                    
+                    route_details = []
+                    for route_id in sorted(set(list(initial_plan.keys()) + list(mitigation_plan.keys()))):
+                        if route_id not in full_route_map:
+                            continue
+                            
+                        initial_qty = initial_plan.get(route_id, 0)
+                        mitigation_qty = mitigation_plan.get(route_id, 0)
+                        
+                        # Only show routes that are used in either plan
+                        if initial_qty == 0 and mitigation_qty == 0:
+                            continue
+                        
+                        # Handle both 2-tuple (direct) and 3-tuple (multi-hop)
+                        route_tuple = full_route_map[route_id]
+                        route_type = "Direct" if len(route_tuple) == 2 else "Multi-Hop"
+                        
+                        if len(route_tuple) == 2:
+                            source, dest = route_tuple
+                            route_path = f"{source} → {dest}"
+                        else:
+                            source, hub, dest = route_tuple
+                            route_path = f"{source} → {hub} → {dest}"
+                        
+                        cost_per_unit = get_route_cost(route_id, df_costs)
+                        
+                        # Try to get distance and cost/km from CSV
+                        distance_km = 500  # default
+                        cost_per_km = 2.0  # default
+                        if df_costs is not None and route_id in df_costs['Route (ID)'].values:
+                            route_data = df_costs[df_costs['Route (ID)'] == route_id].iloc[0]
+                            distance_km = route_data['Route Distance (km)']
+                            cost_per_km = route_data['Cost per Kilometer ($)']
+                        
+                        initial_cost = cost_per_unit * initial_qty
+                        mitigation_cost = cost_per_unit * mitigation_qty
+                        
+                        status = "⚪ Unchanged"
+                        if initial_qty > 0 and mitigation_qty == 0:
+                            status = "🔴 Stopped"
+                        elif initial_qty == 0 and mitigation_qty > 0:
+                            status = "🟢 Activated"
+                        elif initial_qty != mitigation_qty:
+                            status = "🔄 Adjusted"
+                        
+                        # Get currency
+                        currency = requirements.get('currency', 'USD')
+                        
+                        route_details.append({
+                            "Route ID": f"Route {route_id}",
+                            "Type": route_type,
+                            "Route Path": route_path,
+                            "Distance (km)": f"{distance_km:.1f}",
+                            "Cost/km": format_currency(cost_per_km, currency),
+                            "Cost/Unit": format_currency(cost_per_unit, currency),
+                            "Initial Qty": int(initial_qty),
+                            "Mitigation Qty": int(mitigation_qty),
+                            "Initial Cost": format_currency(initial_cost, currency),
+                            "Mitigation Cost": format_currency(mitigation_cost, currency),
+                            "Status": status
+                        })
+                    
+                    if route_details:
+                        route_df = pd.DataFrame(route_details)
+                        st.dataframe(
+                            route_df,
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                        
+                        # Download option
+                        csv = route_df.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Download Detailed Route Plan (CSV)",
+                            data=csv,
+                            file_name=f"route_plan_{destination}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv"
+                        )
+                    
+                    # Summary metrics
+                    st.markdown("---")
+                    st.markdown("### 📈 Route Change Summary")
+                    
+                    # Get route change summary
+                    change_summary = get_route_change_summary(
+                        initial_plan,
+                        mitigation_plan,
+                        ROUTE_MAP
+                    )
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric(
+                            "Total Routes",
+                            f"{len([r for r in ROUTE_MAP.keys()])}"
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            "Active Routes (Initial)",
+                            f"{len([r for r, q in initial_plan.items() if q > 0])}"
+                        )
+                    
+                    with col3:
+                        st.metric(
+                            "Active Routes (Mitigation)",
+                            f"{len([r for r, q in mitigation_plan.items() if q > 0])}"
+                        )
+                    
+                    # Detailed breakdown
+                    with st.expander("📋 Detailed Route Status Breakdown"):
+                        col_a, col_b, col_c, col_d = st.columns(4)
+                        
+                        with col_a:
+                            st.metric("🔴 Stopped", change_summary['stopped'])
+                        with col_b:
+                            st.metric("🟢 Activated", change_summary['activated'])
+                        with col_c:
+                            st.metric("🟡 Balanced", change_summary['balanced'])
+                        with col_d:
+                            st.metric("⚪ Unchanged", change_summary['unchanged'])
+                
+                else:
+                    st.info("No significant route changes detected")
+        
+        except ImportError as e:
+            st.error(f"Mitigation module not available: {e}")
+            st.info("Make sure mitigation_module is properly installed")
+    
+    with tab4:
         st.markdown('<div class="sub-header">Analytics & Visualization</div>', unsafe_allow_html=True)
         
         if 'fmea_df' in st.session_state:
@@ -704,7 +1260,7 @@ def main():
         else:
             st.info("Generate an FMEA first to see analytics.")
     
-    with tab4:
+    with tab5:
         st.markdown('<div class="sub-header">Help & Documentation</div>', unsafe_allow_html=True)
         
         st.markdown("""
