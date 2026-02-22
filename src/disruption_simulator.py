@@ -290,7 +290,7 @@ class DisruptionSimulator:
             total_affected = len(level1_indices) + len(level2_indices)
 
             # Identify the highest-RPN row for the summary
-            if len(updated_fmea) > 0:
+            if len(updated_fmea) > 0 and updated_fmea[rpn_col].notna().any():
                 max_rpn_row = updated_fmea.loc[updated_fmea[rpn_col].idxmax()]
                 highest_rpn_component = str(
                     max_rpn_row.get(
